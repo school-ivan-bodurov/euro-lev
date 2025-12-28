@@ -62,19 +62,19 @@
             <div class="absolute inset-0 border-2 border-dashed border-white/30 pointer-events-none rounded-xl m-4"></div>
             
             <button id="capture-btn" class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-2 rounded-full font-semibold shadow-xl active:scale-95 transition-transform">
-                Снимай сума
+                Снимай етикет
             </button>
         </div>
 
         <!-- Processing Indicator -->
         <div id="status" class="hidden text-center p-2 bg-blue-100 text-blue-700 rounded-lg text-sm animate-pulse">
-            Анализиране на табелата...
+            Търсене на цени BGN и EUR...
         </div>
 
         <!-- Conversion Display -->
         <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative">
             <div id="currency-detected" class="absolute -top-3 right-4 hidden">
-                <span class="bg-blue-600 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-sm detected-badge uppercase">Валута: <span id="detected-val">BGN</span></span>
+                <span class="bg-blue-600 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-sm detected-badge uppercase">Скенерът откри суми</span>
             </div>
 
             <div class="grid grid-cols-2 gap-4">
@@ -114,15 +114,13 @@
             </div>
         </div>
 
-        <!-- Stacked Items List -->
+        <!-- Items List -->
         <div class="space-y-2 pb-10">
             <div class="flex justify-between items-center px-2">
                 <h2 class="font-bold text-gray-700">Списък покупки</h2>
                 <button id="clear-list" class="text-xs text-red-500 font-medium hover:underline">Изчисти всичко</button>
             </div>
-            <div id="items-list" class="space-y-2">
-                <!-- Items will appear here -->
-            </div>
+            <div id="items-list" class="space-y-2"></div>
         </div>
 
     </main>
@@ -162,7 +160,6 @@
         const totalEurEl = document.getElementById('total-eur');
         const itemCountEl = document.getElementById('item-count');
         const detectedBadge = document.getElementById('currency-detected');
-        const detectedVal = document.getElementById('detected-val');
         const bgnWrapper = document.getElementById('bgn-wrapper');
         const eurWrapper = document.getElementById('eur-wrapper');
         
@@ -172,6 +169,7 @@
 
         let cartItems = [];
         let grandTotalBgn = 0;
+        let grandTotalEur = 0;
         let paidInCurrency = 'BGN';
 
         async function initCamera() {
@@ -188,23 +186,12 @@
         bgnInput.addEventListener('input', (e) => {
             const val = parseFloat(e.target.value);
             if (!isNaN(val)) eurInput.value = (val / RATE).toFixed(2);
-            else eurInput.value = '';
-            highlightInput('BGN');
         });
 
         eurInput.addEventListener('input', (e) => {
             const val = parseFloat(e.target.value);
             if (!isNaN(val)) bgnInput.value = (val * RATE).toFixed(2);
-            else bgnInput.value = '';
-            highlightInput('EUR');
         });
-
-        function highlightInput(currency) {
-            bgnWrapper.classList.remove('bg-blue-50', 'border-blue-200');
-            eurWrapper.classList.remove('bg-blue-50', 'border-blue-200');
-            if(currency === 'BGN') bgnWrapper.classList.add('bg-blue-50', 'border-blue-200');
-            if(currency === 'EUR') eurWrapper.classList.add('bg-blue-50', 'border-blue-200');
-        }
 
         toggleCurrencyBtn.onclick = () => {
             paidInCurrency = paidInCurrency === 'BGN' ? 'EUR' : 'BGN';
@@ -221,15 +208,23 @@
                 changeDisplay.classList.add('hidden');
                 return;
             }
-            const paidInBgn = paidInCurrency === 'BGN' ? val : val * RATE;
-            if (paidInBgn >= grandTotalBgn - 0.005) {
-                const change = paidInBgn - grandTotalBgn;
-                changeBgnEl.innerText = `${change.toFixed(2)} лв.`;
-                changeEurEl.innerText = `${(change / RATE).toFixed(2)} €`;
-                changeDisplay.classList.remove('hidden');
+            
+            let changeBgn, changeEur;
+            if (paidInCurrency === 'BGN') {
+                const change = val - grandTotalBgn;
+                if (change < -0.01) { changeDisplay.classList.add('hidden'); return; }
+                changeBgn = change;
+                changeEur = change / RATE;
             } else {
-                changeDisplay.classList.add('hidden');
+                const changeInEur = val - grandTotalEur;
+                if (changeInEur < -0.01) { changeDisplay.classList.add('hidden'); return; }
+                changeEur = changeInEur;
+                changeBgn = changeInEur * RATE;
             }
+
+            changeBgnEl.innerText = `${Math.max(0, changeBgn).toFixed(2)} лв.`;
+            changeEurEl.innerText = `${Math.max(0, changeEur).toFixed(2)} €`;
+            changeDisplay.classList.remove('hidden');
         }
 
         document.getElementById('capture-btn').onclick = async () => {
@@ -243,7 +238,6 @@
             ctx.drawImage(video, 0, 0);
             
             try {
-                // Използваме 'full' резултати от Tesseract за анализ на шрифта и кутиите
                 const worker = await Tesseract.createWorker('bul+eng');
                 const { data } = await worker.recognize(canvas);
                 await worker.terminate();
@@ -251,51 +245,56 @@
                 const words = data.words;
                 if (!words || words.length === 0) return;
 
-                // 1. Филтриране на зачеркнати цени (Търсим думи, които са близо до символи за зачеркване или в специфичен контекст)
-                // Но най-ефективно е да търсим най-големите цифри (Main Price)
-                
-                // 2. Намираме "най-голямата" дума по височина на шрифта
+                // Филтрираме само думи, съдържащи числа и с добра увереност
                 let candidates = words.filter(w => {
-                    const text = w.text.replace(',', '.');
-                    return /\d+/.test(text) && w.confidence > 50;
+                    const cleanText = w.text.replace(',', '.');
+                    return /\d+/.test(cleanText) && w.confidence > 50;
                 });
 
                 if (candidates.length === 0) return;
 
-                // Сортираме по размер на шрифта (височина на bbox) - голямата цена е най-важна
+                // Сортираме по размер на шрифта (височина), за да хванем основните цени
                 candidates.sort((a, b) => (b.bbox.y1 - b.bbox.y0) - (a.bbox.y1 - a.bbox.y0));
                 
-                const mainPriceWord = candidates[0]; // Това е най-голямото число на табелата
-                const mainPriceText = mainPriceWord.text.replace(',', '.').match(/\d+\.?\d*/);
+                let foundBgn = null;
+                let foundEur = null;
+
+                // Анализираме топ кандидатите (най-големите числа)
+                for (let i = 0; i < Math.min(candidates.length, 5); i++) {
+                    const cand = candidates[i];
+                    const text = cand.text.replace(',', '.');
+                    const numMatch = text.match(/\d+\.\d{2}/) || text.match(/\d+/);
+                    if (!numMatch) continue;
+                    
+                    const val = parseFloat(numMatch[0]);
+
+                    // Търсим контекст около това число
+                    const context = words.filter(w => {
+                        const dx = Math.abs(w.bbox.x0 - cand.bbox.x0);
+                        const dy = Math.abs(w.bbox.y0 - cand.bbox.y0);
+                        return dx < 250 && dy < 80;
+                    }).map(w => w.text.toLowerCase()).join('');
+
+                    if ((context.includes('€') || context.includes('eur')) && !foundEur) {
+                        foundEur = val;
+                    } else if ((context.includes('лв') || context.includes('bgn')) && !foundBgn) {
+                        foundBgn = val;
+                    } else if (!foundBgn) {
+                        // Ако няма индикатор, но е голямо число, приемаме го за лева по подразбиране
+                        foundBgn = val;
+                    }
+                }
+
+                // Ако сме намерили и двете, ги попълваме директно без формула
+                if (foundBgn) bgnInput.value = foundBgn.toFixed(2);
+                if (foundEur) eurInput.value = foundEur.toFixed(2);
                 
-                if (!mainPriceText) return;
-                const price = parseFloat(mainPriceText[0]);
+                // Ако липсва едното, тогава прилагаме формулата като резервен вариант
+                if (foundBgn && !foundEur) eurInput.value = (foundBgn / RATE).toFixed(2);
+                if (foundEur && !foundBgn) bgnInput.value = (foundEur * RATE).toFixed(2);
 
-                // 3. Търсим валута в близост до това голямо число
-                const nearbyText = words
-                    .filter(w => {
-                        const dx = Math.abs(w.bbox.x0 - mainPriceWord.bbox.x0);
-                        const dy = Math.abs(w.bbox.y0 - mainPriceWord.bbox.y0);
-                        return dx < 300 && dy < 100; // Търсим в радиус
-                    })
-                    .map(w => w.text.toLowerCase())
-                    .join('');
-
-                const isEuro = nearbyText.includes('€') || nearbyText.includes('eur');
-                const isBgn = nearbyText.includes('лв') || nearbyText.includes('bgn');
-
-                // Хард-фикс логика
-                if (isEuro && !isBgn) {
-                    eurInput.value = price.toFixed(2);
-                    bgnInput.value = (price * RATE).toFixed(2);
-                    showDetectedBadge('EUR');
-                    highlightInput('EUR');
-                } else {
-                    // По подразбиране или ако е открит ЛВ
-                    bgnInput.value = price.toFixed(2);
-                    eurInput.value = (price / RATE).toFixed(2);
-                    showDetectedBadge('BGN');
-                    highlightInput('BGN');
+                if (foundBgn || foundEur) {
+                    detectedBadge.classList.remove('hidden');
                 }
 
             } catch (e) {
@@ -306,27 +305,21 @@
             }
         };
 
-        function showDetectedBadge(val) {
-            detectedVal.innerText = val;
-            detectedBadge.classList.remove('hidden');
-        }
-
         document.getElementById('add-to-cart').onclick = () => {
             const bgn = parseFloat(bgnInput.value);
-            if (isNaN(bgn)) return;
+            const eur = parseFloat(eurInput.value);
+            if (isNaN(bgn) || isNaN(eur)) return;
 
             cartItems.push({
                 id: Date.now(),
                 bgn: bgn,
-                eur: bgn / RATE
+                eur: eur
             });
             
             updateUI();
             bgnInput.value = '';
             eurInput.value = '';
             detectedBadge.classList.add('hidden');
-            bgnWrapper.classList.remove('bg-blue-50', 'border-blue-200');
-            eurWrapper.classList.remove('bg-blue-50', 'border-blue-200');
         };
 
         document.getElementById('clear-list').onclick = () => {
@@ -343,15 +336,17 @@
         function updateUI() {
             itemsList.innerHTML = '';
             grandTotalBgn = 0;
+            grandTotalEur = 0;
             
             cartItems.forEach(item => {
                 grandTotalBgn += item.bgn;
+                grandTotalEur += item.eur;
                 const div = document.createElement('div');
                 div.className = "flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-gray-100 animate-in fade-in slide-in-from-right-4 duration-300";
                 div.innerHTML = `
-                    <div>
+                    <div class="flex flex-col">
                         <span class="font-bold text-gray-800">${item.bgn.toFixed(2)} лв.</span>
-                        <span class="text-xs text-gray-400 ml-2">(${item.eur.toFixed(2)} €)</span>
+                        <span class="text-xs text-blue-500 font-medium">${item.eur.toFixed(2)} €</span>
                     </div>
                     <button onclick="removeItem(${item.id})" class="text-red-400 p-2 active:scale-75 transition-transform">✕</button>
                 `;
@@ -359,7 +354,7 @@
             });
 
             totalBgnEl.innerText = `${grandTotalBgn.toFixed(2)} лв.`;
-            totalEurEl.innerText = `${(grandTotalBgn / RATE).toFixed(2)} €`;
+            totalEurEl.innerText = `${grandTotalEur.toFixed(2)} €`;
             itemCountEl.innerText = `${cartItems.length} продукта`;
             
             calculateChange();
