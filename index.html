@@ -227,6 +227,23 @@
             changeDisplay.classList.remove('hidden');
         }
 
+        // HARD-FIX: Функция за почистване и нормализиране на число
+        function cleanNumericValue(rawText) {
+            // Премахваме всичко, което не е цифра, запетая или точка
+            let cleaned = rawText.replace(/[^0-9.,]/g, '');
+            
+            // Ако има запетая, я правим точка
+            cleaned = cleaned.replace(',', '.');
+            
+            // Ако има повече от една точка (грешка в OCR), оставяме само първите две части
+            const parts = cleaned.split('.');
+            if (parts.length > 2) {
+                cleaned = parts[0] + '.' + parts[1].substring(0, 2);
+            }
+            
+            return cleaned;
+        }
+
         document.getElementById('capture-btn').onclick = async () => {
             statusDiv.classList.remove('hidden');
             laser.classList.remove('hidden');
@@ -245,51 +262,49 @@
                 const words = data.words;
                 if (!words || words.length === 0) return;
 
-                // Филтрираме само думи, съдържащи числа и с добра увереност
+                // Филтрираме и нормализираме кандидатите
                 let candidates = words.filter(w => {
-                    const cleanText = w.text.replace(',', '.');
-                    return /\d+/.test(cleanText) && w.confidence > 50;
+                    const norm = cleanNumericValue(w.text);
+                    return /\d+/.test(norm) && w.confidence > 45;
                 });
 
                 if (candidates.length === 0) return;
 
-                // Сортираме по размер на шрифта (височина), за да хванем основните цени
+                // Сортираме по размер на шрифта
                 candidates.sort((a, b) => (b.bbox.y1 - b.bbox.y0) - (a.bbox.y1 - a.bbox.y0));
                 
                 let foundBgn = null;
                 let foundEur = null;
 
-                // Анализираме топ кандидатите (най-големите числа)
-                for (let i = 0; i < Math.min(candidates.length, 5); i++) {
+                for (let i = 0; i < Math.min(candidates.length, 6); i++) {
                     const cand = candidates[i];
-                    const text = cand.text.replace(',', '.');
-                    const numMatch = text.match(/\d+\.\d{2}/) || text.match(/\d+/);
-                    if (!numMatch) continue;
+                    const normText = cleanNumericValue(cand.text);
                     
-                    const val = parseFloat(numMatch[0]);
+                    // Търсим пълно число (напр. 2.50 или поне цифра)
+                    const val = parseFloat(normText);
+                    if (isNaN(val)) continue;
 
-                    // Търсим контекст около това число
                     const context = words.filter(w => {
                         const dx = Math.abs(w.bbox.x0 - cand.bbox.x0);
                         const dy = Math.abs(w.bbox.y0 - cand.bbox.y0);
-                        return dx < 250 && dy < 80;
+                        return dx < 280 && dy < 100;
                     }).map(w => w.text.toLowerCase()).join('');
 
-                    if ((context.includes('€') || context.includes('eur')) && !foundEur) {
+                    // Приоритизация по контекст
+                    if ((context.includes('€') || context.includes('eur') || context.includes('e')) && !foundEur) {
                         foundEur = val;
-                    } else if ((context.includes('лв') || context.includes('bgn')) && !foundBgn) {
+                    } else if ((context.includes('лв') || context.includes('bgn') || context.includes('л')) && !foundBgn) {
                         foundBgn = val;
                     } else if (!foundBgn) {
-                        // Ако няма индикатор, но е голямо число, приемаме го за лева по подразбиране
                         foundBgn = val;
                     }
                 }
 
-                // Ако сме намерили и двете, ги попълваме директно без формула
+                // Попълване на полетата
                 if (foundBgn) bgnInput.value = foundBgn.toFixed(2);
                 if (foundEur) eurInput.value = foundEur.toFixed(2);
                 
-                // Ако липсва едното, тогава прилагаме формулата като резервен вариант
+                // Резервна логика ако липсва едното
                 if (foundBgn && !foundEur) eurInput.value = (foundBgn / RATE).toFixed(2);
                 if (foundEur && !foundBgn) bgnInput.value = (foundEur * RATE).toFixed(2);
 
