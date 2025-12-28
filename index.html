@@ -50,7 +50,7 @@
     <!-- Header -->
     <header class="sticky top-0 z-50 bg-white/80 ios-blur border-b p-4 text-center">
         <h1 class="text-xl font-bold text-blue-600">BGN ⟷ EUR Scanner</h1>
-        <p class="text-xs text-gray-500">Курс: 1.95583</p>
+        <p class="text-xs text-gray-500">BNB: 1.95583</p>
     </header>
 
     <main class="p-4 space-y-4 max-w-lg mx-auto">
@@ -68,21 +68,21 @@
 
         <!-- Processing Indicator -->
         <div id="status" class="hidden text-center p-2 bg-blue-100 text-blue-700 rounded-lg text-sm animate-pulse">
-            Търсене на сума и валута...
+            Анализиране на табелата...
         </div>
 
         <!-- Conversion Display -->
         <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative">
             <div id="currency-detected" class="absolute -top-3 right-4 hidden">
-                <span class="bg-yellow-400 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-sm detected-badge uppercase">Разпознато: <span id="detected-val">BGN</span></span>
+                <span class="bg-blue-600 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-sm detected-badge uppercase">Валута: <span id="detected-val">BGN</span></span>
             </div>
 
             <div class="grid grid-cols-2 gap-4">
-                <div id="bgn-wrapper" class="transition-all duration-300 p-2 rounded-lg">
+                <div id="bgn-wrapper" class="transition-all duration-300 p-2 rounded-lg border border-transparent">
                     <label class="block text-xs font-medium text-gray-400 uppercase mb-1">Лева (BGN)</label>
                     <input type="number" id="bgn-input" step="0.01" inputmode="decimal" class="w-full text-2xl font-bold outline-none bg-transparent border-b-2 border-transparent focus:border-blue-500 transition-colors" placeholder="0.00">
                 </div>
-                <div id="eur-wrapper" class="transition-all duration-300 p-2 rounded-lg">
+                <div id="eur-wrapper" class="transition-all duration-300 p-2 rounded-lg border border-transparent">
                     <label class="block text-xs font-medium text-gray-400 uppercase mb-1">Евро (EUR)</label>
                     <input type="number" id="eur-input" step="0.01" inputmode="decimal" class="w-full text-2xl font-bold outline-none bg-transparent border-b-2 border-transparent focus:border-blue-500 transition-colors" placeholder="0.00">
                 </div>
@@ -143,7 +143,6 @@
         </div>
     </div>
 
-    <!-- Hidden canvas for processing -->
     <canvas id="canvas" class="hidden"></canvas>
 
     <script>
@@ -175,7 +174,6 @@
         let grandTotalBgn = 0;
         let paidInCurrency = 'BGN';
 
-        // Start Camera
         async function initCamera() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -187,7 +185,6 @@
             }
         }
 
-        // Live Conversion Logic
         bgnInput.addEventListener('input', (e) => {
             const val = parseFloat(e.target.value);
             if (!isNaN(val)) eurInput.value = (val / RATE).toFixed(2);
@@ -203,10 +200,10 @@
         });
 
         function highlightInput(currency) {
-            bgnWrapper.classList.remove('bg-yellow-50', 'ring-1', 'ring-yellow-200');
-            eurWrapper.classList.remove('bg-yellow-50', 'ring-1', 'ring-yellow-200');
-            if(currency === 'BGN') bgnWrapper.classList.add('bg-yellow-50', 'ring-1', 'ring-yellow-200');
-            if(currency === 'EUR') eurWrapper.classList.add('bg-yellow-50', 'ring-1', 'ring-yellow-200');
+            bgnWrapper.classList.remove('bg-blue-50', 'border-blue-200');
+            eurWrapper.classList.remove('bg-blue-50', 'border-blue-200');
+            if(currency === 'BGN') bgnWrapper.classList.add('bg-blue-50', 'border-blue-200');
+            if(currency === 'EUR') eurWrapper.classList.add('bg-blue-50', 'border-blue-200');
         }
 
         toggleCurrencyBtn.onclick = () => {
@@ -235,7 +232,6 @@
             }
         }
 
-        // OCR Processing with Currency Detection
         document.getElementById('capture-btn').onclick = async () => {
             statusDiv.classList.remove('hidden');
             laser.classList.remove('hidden');
@@ -247,32 +243,61 @@
             ctx.drawImage(video, 0, 0);
             
             try {
-                // We recognize all common characters to catch currency symbols
-                const { data: { text } } = await Tesseract.recognize(canvas, 'eng+bul', {
-                    logger: m => console.log(m)
-                });
-
+                // Използваме 'eng+bul' за да разпознаваме символи и кирилица по-добре
+                const { data: { text } } = await Tesseract.recognize(canvas, 'eng+bul');
                 const lowerText = text.toLowerCase();
-                
-                // Detection logic: look for symbols or words
-                const hasEuro = lowerText.includes('€') || lowerText.includes('eur') || lowerText.includes('evro');
-                const hasBgn = lowerText.includes('лв') || lowerText.includes('bgn') || lowerText.includes('lev');
 
-                // Extract price: look for patterns like 10.99 or 10,99
+                // 1. Почистване на текста за по-добра проверка
+                // Заменяме често срещани грешки при OCR
+                const cleanText = lowerText.replace(/\s/g, '');
+
+                // 2. Дефиниране на критерии за валута
+                const containsEuro = cleanText.includes('€') || cleanText.includes('eur') || cleanText.includes('evro');
+                const containsBgn = cleanText.includes('лв') || cleanText.includes('bgn') || cleanText.includes('lev');
+
+                // 3. Извличане на числа (търсим формат X.XX)
                 const matches = text.match(/\d+[.,]\s?\d{2}/g) || text.match(/\d+/g);
                 
                 if (matches) {
                     const priceStr = matches[0].replace(',', '.').replace(/\s/g, '');
                     const price = parseFloat(priceStr);
                     
-                    if (hasEuro && !hasBgn) {
-                        // It's Euro
+                    // Логика за приоритизиране:
+                    if (containsEuro && !containsBgn) {
+                        // Чисто евро
                         eurInput.value = price.toFixed(2);
                         bgnInput.value = (price * RATE).toFixed(2);
                         showDetectedBadge('EUR');
                         highlightInput('EUR');
+                    } else if (containsBgn && !containsEuro) {
+                        // Чист лев
+                        bgnInput.value = price.toFixed(2);
+                        eurInput.value = (price / RATE).toFixed(2);
+                        showDetectedBadge('BGN');
+                        highlightInput('BGN');
+                    } else if (containsEuro && containsBgn) {
+                        // И двата символа са налице. Проверяваме кой е по-близо до сумата.
+                        // За по-просто: приемаме по-голямото число обикновено за лева, 
+                        // но тук залагаме на сигурното: ако има евро символ, 
+                        // често той е по-малък на табелата. 
+                        // Но ще заложим на символа, който е открит ПРЕДИ сумата в текста.
+                        const euroPos = lowerText.indexOf('€');
+                        const bgnPos = lowerText.indexOf('лв');
+                        const pricePos = lowerText.indexOf(matches[0].toLowerCase());
+
+                        if (Math.abs(euroPos - pricePos) < Math.abs(bgnPos - pricePos)) {
+                            eurInput.value = price.toFixed(2);
+                            bgnInput.value = (price * RATE).toFixed(2);
+                            showDetectedBadge('EUR');
+                            highlightInput('EUR');
+                        } else {
+                            bgnInput.value = price.toFixed(2);
+                            eurInput.value = (price / RATE).toFixed(2);
+                            showDetectedBadge('BGN');
+                            highlightInput('BGN');
+                        }
                     } else {
-                        // Default to BGN or if explicitly found BGN
+                        // Няма открит символ - по подразбиране приемаме лева
                         bgnInput.value = price.toFixed(2);
                         eurInput.value = (price / RATE).toFixed(2);
                         showDetectedBadge('BGN');
@@ -280,7 +305,7 @@
                     }
                 }
             } catch (e) {
-                console.error(e);
+                console.error("OCR Error:", e);
             } finally {
                 statusDiv.classList.add('hidden');
                 laser.classList.add('hidden');
@@ -306,8 +331,8 @@
             bgnInput.value = '';
             eurInput.value = '';
             detectedBadge.classList.add('hidden');
-            bgnWrapper.classList.remove('bg-yellow-50', 'ring-1', 'ring-yellow-200');
-            eurWrapper.classList.remove('bg-yellow-50', 'ring-1', 'ring-yellow-200');
+            bgnWrapper.classList.remove('bg-blue-50', 'border-blue-200');
+            eurWrapper.classList.remove('bg-blue-50', 'border-blue-200');
         };
 
         document.getElementById('clear-list').onclick = () => {
