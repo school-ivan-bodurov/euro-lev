@@ -320,15 +320,17 @@
                     }
                 }
 
-                if (foundBgn) bgnInput.value = foundBgn.toFixed(2);
-                if (foundEur) eurInput.value = foundEur.toFixed(2);
-                
-                if (foundBgn && !foundEur) eurInput.value = (foundBgn / RATE).toFixed(2);
-                if (foundEur && !foundBgn) bgnInput.value = (foundEur * RATE).toFixed(2);
+                // АВТОМАТИЧНО ПРЕСМЯТАНЕ ПРИ ЗАСИЧАНЕ
+                if (foundBgn) {
+                    bgnInput.value = foundBgn.toFixed(2);
+                    eurInput.value = (foundBgn / RATE).toFixed(2);
+                } else if (foundEur) {
+                    eurInput.value = foundEur.toFixed(2);
+                    bgnInput.value = (foundEur * RATE).toFixed(2);
+                }
 
                 if (foundBgn || foundEur) {
                     detectedBadge.classList.remove('hidden');
-                    // Визуална обратна връзка
                     window.navigator.vibrate && window.navigator.vibrate(50);
                 }
 
