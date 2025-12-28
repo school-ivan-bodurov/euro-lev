@@ -36,6 +36,13 @@
             50% { top: 100%; }
             100% { top: 0; }
         }
+        .detected-badge {
+            animation: pop 0.3s ease-out;
+        }
+        @keyframes pop {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-900 min-h-screen pb-40">
@@ -43,7 +50,7 @@
     <!-- Header -->
     <header class="sticky top-0 z-50 bg-white/80 ios-blur border-b p-4 text-center">
         <h1 class="text-xl font-bold text-blue-600">BGN ⟷ EUR Scanner</h1>
-        <p class="text-xs text-gray-500">BNB Rate: 1.95583</p>
+        <p class="text-xs text-gray-500">Курс: 1.95583</p>
     </header>
 
     <main class="p-4 space-y-4 max-w-lg mx-auto">
@@ -61,19 +68,23 @@
 
         <!-- Processing Indicator -->
         <div id="status" class="hidden text-center p-2 bg-blue-100 text-blue-700 rounded-lg text-sm animate-pulse">
-            Анализиране на изображението...
+            Търсене на сума и валута...
         </div>
 
         <!-- Conversion Display -->
-        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative">
+            <div id="currency-detected" class="absolute -top-3 right-4 hidden">
+                <span class="bg-yellow-400 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-sm detected-badge uppercase">Разпознато: <span id="detected-val">BGN</span></span>
+            </div>
+
             <div class="grid grid-cols-2 gap-4">
-                <div>
+                <div id="bgn-wrapper" class="transition-all duration-300 p-2 rounded-lg">
                     <label class="block text-xs font-medium text-gray-400 uppercase mb-1">Лева (BGN)</label>
-                    <input type="number" id="bgn-input" step="0.01" inputmode="decimal" class="w-full text-2xl font-bold outline-none border-b-2 border-transparent focus:border-blue-500 transition-colors" placeholder="0.00">
+                    <input type="number" id="bgn-input" step="0.01" inputmode="decimal" class="w-full text-2xl font-bold outline-none bg-transparent border-b-2 border-transparent focus:border-blue-500 transition-colors" placeholder="0.00">
                 </div>
-                <div>
+                <div id="eur-wrapper" class="transition-all duration-300 p-2 rounded-lg">
                     <label class="block text-xs font-medium text-gray-400 uppercase mb-1">Евро (EUR)</label>
-                    <input type="number" id="eur-input" step="0.01" inputmode="decimal" class="w-full text-2xl font-bold outline-none border-b-2 border-transparent focus:border-blue-500 transition-colors" placeholder="0.00">
+                    <input type="number" id="eur-input" step="0.01" inputmode="decimal" class="w-full text-2xl font-bold outline-none bg-transparent border-b-2 border-transparent focus:border-blue-500 transition-colors" placeholder="0.00">
                 </div>
             </div>
             
@@ -83,7 +94,7 @@
         </div>
 
         <!-- Payment & Change Section -->
-        <div class="bg-blue-50 p-6 rounded-2xl border border-blue-100 space-y-4">
+        <div class="bg-blue-50 p-6 rounded-2xl border border-blue-100 space-y-4 shadow-sm">
             <div class="flex justify-between items-center">
                 <h2 class="text-sm font-bold text-blue-800 uppercase tracking-wider">Плащане и Ресто</h2>
                 <button id="toggle-paid-currency" class="bg-blue-600 text-white text-[10px] px-3 py-1 rounded-full font-bold uppercase shadow-sm active:scale-95 transition-transform">
@@ -107,7 +118,7 @@
         <div class="space-y-2 pb-10">
             <div class="flex justify-between items-center px-2">
                 <h2 class="font-bold text-gray-700">Списък покупки</h2>
-                <button id="clear-list" class="text-xs text-red-500 font-medium">Изчисти всичко</button>
+                <button id="clear-list" class="text-xs text-red-500 font-medium hover:underline">Изчисти всичко</button>
             </div>
             <div id="items-list" class="space-y-2">
                 <!-- Items will appear here -->
@@ -120,7 +131,7 @@
     <div class="fixed bottom-0 left-0 right-0 bg-white border-t p-4 ios-blur shadow-[0_-5px_15px_rgba(0,0,0,0.05)] z-50">
         <div class="max-w-lg mx-auto flex justify-between items-center">
             <div>
-                <p class="text-xs text-gray-400 uppercase font-bold">Обща сума:</p>
+                <p class="text-xs text-gray-400 uppercase font-bold tracking-tighter">Обща сума:</p>
                 <div class="flex gap-3 items-baseline">
                     <span id="total-bgn" class="text-xl font-black text-gray-800">0.00 лв.</span>
                     <span id="total-eur" class="text-base font-bold text-blue-600">0.00 €</span>
@@ -151,6 +162,10 @@
         const totalBgnEl = document.getElementById('total-bgn');
         const totalEurEl = document.getElementById('total-eur');
         const itemCountEl = document.getElementById('item-count');
+        const detectedBadge = document.getElementById('currency-detected');
+        const detectedVal = document.getElementById('detected-val');
+        const bgnWrapper = document.getElementById('bgn-wrapper');
+        const eurWrapper = document.getElementById('eur-wrapper');
         
         const toggleCurrencyBtn = document.getElementById('toggle-paid-currency');
         const paidCurrencyLabel = document.getElementById('paid-currency-label');
@@ -158,7 +173,7 @@
 
         let cartItems = [];
         let grandTotalBgn = 0;
-        let paidInCurrency = 'BGN'; // Default
+        let paidInCurrency = 'BGN';
 
         // Start Camera
         async function initCamera() {
@@ -177,15 +192,23 @@
             const val = parseFloat(e.target.value);
             if (!isNaN(val)) eurInput.value = (val / RATE).toFixed(2);
             else eurInput.value = '';
+            highlightInput('BGN');
         });
 
         eurInput.addEventListener('input', (e) => {
             const val = parseFloat(e.target.value);
             if (!isNaN(val)) bgnInput.value = (val * RATE).toFixed(2);
             else bgnInput.value = '';
+            highlightInput('EUR');
         });
 
-        // Toggle Payment Currency
+        function highlightInput(currency) {
+            bgnWrapper.classList.remove('bg-yellow-50', 'ring-1', 'ring-yellow-200');
+            eurWrapper.classList.remove('bg-yellow-50', 'ring-1', 'ring-yellow-200');
+            if(currency === 'BGN') bgnWrapper.classList.add('bg-yellow-50', 'ring-1', 'ring-yellow-200');
+            if(currency === 'EUR') eurWrapper.classList.add('bg-yellow-50', 'ring-1', 'ring-yellow-200');
+        }
+
         toggleCurrencyBtn.onclick = () => {
             paidInCurrency = paidInCurrency === 'BGN' ? 'EUR' : 'BGN';
             paidCurrencyLabel.innerText = paidInCurrency;
@@ -193,7 +216,6 @@
             calculateChange();
         };
 
-        // Change Calculation
         paidInput.addEventListener('input', calculateChange);
 
         function calculateChange() {
@@ -202,11 +224,8 @@
                 changeDisplay.classList.add('hidden');
                 return;
             }
-
-            // Convert paid value to BGN for unified calculation
             const paidInBgn = paidInCurrency === 'BGN' ? val : val * RATE;
-
-            if (paidInBgn >= grandTotalBgn - 0.001) { // Floating point precision safety
+            if (paidInBgn >= grandTotalBgn - 0.005) {
                 const change = paidInBgn - grandTotalBgn;
                 changeBgnEl.innerText = `${change.toFixed(2)} лв.`;
                 changeEurEl.innerText = `${(change / RATE).toFixed(2)} €`;
@@ -216,26 +235,49 @@
             }
         }
 
-        // OCR Processing
+        // OCR Processing with Currency Detection
         document.getElementById('capture-btn').onclick = async () => {
             statusDiv.classList.remove('hidden');
             laser.classList.remove('hidden');
+            detectedBadge.classList.add('hidden');
             
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            canvas.getContext('2d').drawImage(video, 0, 0);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
             
             try {
-                const { data: { text } } = await Tesseract.recognize(canvas, 'eng', {
-                    tessedit_char_whitelist: '0123456789.,'
+                // We recognize all common characters to catch currency symbols
+                const { data: { text } } = await Tesseract.recognize(canvas, 'eng+bul', {
+                    logger: m => console.log(m)
                 });
 
-                const matches = text.match(/\d+[.,]\d{2}/g) || text.match(/\d+/g);
+                const lowerText = text.toLowerCase();
+                
+                // Detection logic: look for symbols or words
+                const hasEuro = lowerText.includes('€') || lowerText.includes('eur') || lowerText.includes('evro');
+                const hasBgn = lowerText.includes('лв') || lowerText.includes('bgn') || lowerText.includes('lev');
+
+                // Extract price: look for patterns like 10.99 or 10,99
+                const matches = text.match(/\d+[.,]\s?\d{2}/g) || text.match(/\d+/g);
+                
                 if (matches) {
-                    const priceStr = matches[0].replace(',', '.');
+                    const priceStr = matches[0].replace(',', '.').replace(/\s/g, '');
                     const price = parseFloat(priceStr);
-                    bgnInput.value = price.toFixed(2);
-                    eurInput.value = (price / RATE).toFixed(2);
+                    
+                    if (hasEuro && !hasBgn) {
+                        // It's Euro
+                        eurInput.value = price.toFixed(2);
+                        bgnInput.value = (price * RATE).toFixed(2);
+                        showDetectedBadge('EUR');
+                        highlightInput('EUR');
+                    } else {
+                        // Default to BGN or if explicitly found BGN
+                        bgnInput.value = price.toFixed(2);
+                        eurInput.value = (price / RATE).toFixed(2);
+                        showDetectedBadge('BGN');
+                        highlightInput('BGN');
+                    }
                 }
             } catch (e) {
                 console.error(e);
@@ -245,7 +287,11 @@
             }
         };
 
-        // Cart Management
+        function showDetectedBadge(val) {
+            detectedVal.innerText = val;
+            detectedBadge.classList.remove('hidden');
+        }
+
         document.getElementById('add-to-cart').onclick = () => {
             const bgn = parseFloat(bgnInput.value);
             if (isNaN(bgn)) return;
@@ -259,6 +305,9 @@
             updateUI();
             bgnInput.value = '';
             eurInput.value = '';
+            detectedBadge.classList.add('hidden');
+            bgnWrapper.classList.remove('bg-yellow-50', 'ring-1', 'ring-yellow-200');
+            eurWrapper.classList.remove('bg-yellow-50', 'ring-1', 'ring-yellow-200');
         };
 
         document.getElementById('clear-list').onclick = () => {
@@ -283,9 +332,9 @@
                 div.innerHTML = `
                     <div>
                         <span class="font-bold text-gray-800">${item.bgn.toFixed(2)} лв.</span>
-                        <span class="text-sm text-gray-400 ml-2">(${item.eur.toFixed(2)} €)</span>
+                        <span class="text-xs text-gray-400 ml-2">(${item.eur.toFixed(2)} €)</span>
                     </div>
-                    <button onclick="removeItem(${item.id})" class="text-red-400 p-2 active:scale-90 transition-transform">✕</button>
+                    <button onclick="removeItem(${item.id})" class="text-red-400 p-2 active:scale-75 transition-transform">✕</button>
                 `;
                 itemsList.prepend(div);
             });
