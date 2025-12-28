@@ -243,67 +243,61 @@
             ctx.drawImage(video, 0, 0);
             
             try {
-                // Използваме 'eng+bul' за да разпознаваме символи и кирилица по-добре
-                const { data: { text } } = await Tesseract.recognize(canvas, 'eng+bul');
-                const lowerText = text.toLowerCase();
+                // Използваме 'full' резултати от Tesseract за анализ на шрифта и кутиите
+                const worker = await Tesseract.createWorker('bul+eng');
+                const { data } = await worker.recognize(canvas);
+                await worker.terminate();
 
-                // 1. Почистване на текста за по-добра проверка
-                // Заменяме често срещани грешки при OCR
-                const cleanText = lowerText.replace(/\s/g, '');
+                const words = data.words;
+                if (!words || words.length === 0) return;
 
-                // 2. Дефиниране на критерии за валута
-                const containsEuro = cleanText.includes('€') || cleanText.includes('eur') || cleanText.includes('evro');
-                const containsBgn = cleanText.includes('лв') || cleanText.includes('bgn') || cleanText.includes('lev');
-
-                // 3. Извличане на числа (търсим формат X.XX)
-                const matches = text.match(/\d+[.,]\s?\d{2}/g) || text.match(/\d+/g);
+                // 1. Филтриране на зачеркнати цени (Търсим думи, които са близо до символи за зачеркване или в специфичен контекст)
+                // Но най-ефективно е да търсим най-големите цифри (Main Price)
                 
-                if (matches) {
-                    const priceStr = matches[0].replace(',', '.').replace(/\s/g, '');
-                    const price = parseFloat(priceStr);
-                    
-                    // Логика за приоритизиране:
-                    if (containsEuro && !containsBgn) {
-                        // Чисто евро
-                        eurInput.value = price.toFixed(2);
-                        bgnInput.value = (price * RATE).toFixed(2);
-                        showDetectedBadge('EUR');
-                        highlightInput('EUR');
-                    } else if (containsBgn && !containsEuro) {
-                        // Чист лев
-                        bgnInput.value = price.toFixed(2);
-                        eurInput.value = (price / RATE).toFixed(2);
-                        showDetectedBadge('BGN');
-                        highlightInput('BGN');
-                    } else if (containsEuro && containsBgn) {
-                        // И двата символа са налице. Проверяваме кой е по-близо до сумата.
-                        // За по-просто: приемаме по-голямото число обикновено за лева, 
-                        // но тук залагаме на сигурното: ако има евро символ, 
-                        // често той е по-малък на табелата. 
-                        // Но ще заложим на символа, който е открит ПРЕДИ сумата в текста.
-                        const euroPos = lowerText.indexOf('€');
-                        const bgnPos = lowerText.indexOf('лв');
-                        const pricePos = lowerText.indexOf(matches[0].toLowerCase());
+                // 2. Намираме "най-голямата" дума по височина на шрифта
+                let candidates = words.filter(w => {
+                    const text = w.text.replace(',', '.');
+                    return /\d+/.test(text) && w.confidence > 50;
+                });
 
-                        if (Math.abs(euroPos - pricePos) < Math.abs(bgnPos - pricePos)) {
-                            eurInput.value = price.toFixed(2);
-                            bgnInput.value = (price * RATE).toFixed(2);
-                            showDetectedBadge('EUR');
-                            highlightInput('EUR');
-                        } else {
-                            bgnInput.value = price.toFixed(2);
-                            eurInput.value = (price / RATE).toFixed(2);
-                            showDetectedBadge('BGN');
-                            highlightInput('BGN');
-                        }
-                    } else {
-                        // Няма открит символ - по подразбиране приемаме лева
-                        bgnInput.value = price.toFixed(2);
-                        eurInput.value = (price / RATE).toFixed(2);
-                        showDetectedBadge('BGN');
-                        highlightInput('BGN');
-                    }
+                if (candidates.length === 0) return;
+
+                // Сортираме по размер на шрифта (височина на bbox) - голямата цена е най-важна
+                candidates.sort((a, b) => (b.bbox.y1 - b.bbox.y0) - (a.bbox.y1 - a.bbox.y0));
+                
+                const mainPriceWord = candidates[0]; // Това е най-голямото число на табелата
+                const mainPriceText = mainPriceWord.text.replace(',', '.').match(/\d+\.?\d*/);
+                
+                if (!mainPriceText) return;
+                const price = parseFloat(mainPriceText[0]);
+
+                // 3. Търсим валута в близост до това голямо число
+                const nearbyText = words
+                    .filter(w => {
+                        const dx = Math.abs(w.bbox.x0 - mainPriceWord.bbox.x0);
+                        const dy = Math.abs(w.bbox.y0 - mainPriceWord.bbox.y0);
+                        return dx < 300 && dy < 100; // Търсим в радиус
+                    })
+                    .map(w => w.text.toLowerCase())
+                    .join('');
+
+                const isEuro = nearbyText.includes('€') || nearbyText.includes('eur');
+                const isBgn = nearbyText.includes('лв') || nearbyText.includes('bgn');
+
+                // Хард-фикс логика
+                if (isEuro && !isBgn) {
+                    eurInput.value = price.toFixed(2);
+                    bgnInput.value = (price * RATE).toFixed(2);
+                    showDetectedBadge('EUR');
+                    highlightInput('EUR');
+                } else {
+                    // По подразбиране или ако е открит ЛВ
+                    bgnInput.value = price.toFixed(2);
+                    eurInput.value = (price / RATE).toFixed(2);
+                    showDetectedBadge('BGN');
+                    highlightInput('BGN');
                 }
+
             } catch (e) {
                 console.error("OCR Error:", e);
             } finally {
