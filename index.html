@@ -84,9 +84,14 @@
 
         <!-- Payment & Change Section -->
         <div class="bg-blue-50 p-6 rounded-2xl border border-blue-100 space-y-4">
-            <h2 class="text-sm font-bold text-blue-800 uppercase tracking-wider">Плащане и Ресто</h2>
+            <div class="flex justify-between items-center">
+                <h2 class="text-sm font-bold text-blue-800 uppercase tracking-wider">Плащане и Ресто</h2>
+                <button id="toggle-paid-currency" class="bg-blue-600 text-white text-[10px] px-3 py-1 rounded-full font-bold uppercase shadow-sm active:scale-95 transition-transform">
+                    Валута: <span id="paid-currency-label">BGN</span>
+                </button>
+            </div>
             <div>
-                <label class="block text-xs font-medium text-blue-600 uppercase mb-1">Дадена сума (BGN)</label>
+                <label class="block text-xs font-medium text-blue-600 uppercase mb-1">Дадена сума (<span id="paid-label-text">BGN</span>)</label>
                 <input type="number" id="paid-amount" step="0.01" inputmode="decimal" class="w-full bg-transparent text-2xl font-bold outline-none border-b-2 border-blue-200 focus:border-blue-500 transition-colors" placeholder="Въведете сума">
             </div>
             <div id="change-display" class="hidden pt-2 border-t border-blue-200">
@@ -146,9 +151,14 @@
         const totalBgnEl = document.getElementById('total-bgn');
         const totalEurEl = document.getElementById('total-eur');
         const itemCountEl = document.getElementById('item-count');
+        
+        const toggleCurrencyBtn = document.getElementById('toggle-paid-currency');
+        const paidCurrencyLabel = document.getElementById('paid-currency-label');
+        const paidLabelText = document.getElementById('paid-label-text');
 
         let cartItems = [];
         let grandTotalBgn = 0;
+        let paidInCurrency = 'BGN'; // Default
 
         // Start Camera
         async function initCamera() {
@@ -175,13 +185,29 @@
             else bgnInput.value = '';
         });
 
+        // Toggle Payment Currency
+        toggleCurrencyBtn.onclick = () => {
+            paidInCurrency = paidInCurrency === 'BGN' ? 'EUR' : 'BGN';
+            paidCurrencyLabel.innerText = paidInCurrency;
+            paidLabelText.innerText = paidInCurrency;
+            calculateChange();
+        };
+
         // Change Calculation
         paidInput.addEventListener('input', calculateChange);
 
         function calculateChange() {
-            const paid = parseFloat(paidInput.value);
-            if (!isNaN(paid) && grandTotalBgn > 0 && paid >= grandTotalBgn) {
-                const change = paid - grandTotalBgn;
+            const val = parseFloat(paidInput.value);
+            if (isNaN(val) || grandTotalBgn <= 0) {
+                changeDisplay.classList.add('hidden');
+                return;
+            }
+
+            // Convert paid value to BGN for unified calculation
+            const paidInBgn = paidInCurrency === 'BGN' ? val : val * RATE;
+
+            if (paidInBgn >= grandTotalBgn - 0.001) { // Floating point precision safety
+                const change = paidInBgn - grandTotalBgn;
                 changeBgnEl.innerText = `${change.toFixed(2)} лв.`;
                 changeEurEl.innerText = `${(change / RATE).toFixed(2)} €`;
                 changeDisplay.classList.remove('hidden');
